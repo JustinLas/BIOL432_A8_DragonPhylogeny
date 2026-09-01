@@ -1,0 +1,216 @@
+---
+title: "BIOL 432 — Assignment 8: Dragon Phylogeny"
+author: "Justin Lasrado"
+date: "2025-10-28"
+output: html_document
+---
+
+## Overview
+
+For this assignment I used the Dragon Phylogeny character matrix from the Colautti Lab and added three dragons from *Game of Thrones*: Drogon, Rhaegal, and Viserion. I then calculated distances between the dragons and built a Neighbor-Joining tree.
+
+The original Dragon Phylogeny project uses binary-coded traits. Missing traits are represented by `?` in the Nexus file.
+
+## Packages
+
+```{r setup, message=FALSE, warning=FALSE}
+library(ape)
+library(ggplot2)
+library(ggtree)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read in the original data
+
+```{r read-data}
+DragonNexus <- read.nexus.data("Data/DragonMatrix.nex")
+
+# Number of traits in the dataset
+num_traits <- length(DragonNexus[[1]])
+
+DragonNexusDF <- data.frame(
+  matrix(unlist(DragonNexus), ncol = num_traits, byrow = TRUE),
+  stringsAsFactors = FALSE
+)
+
+row.names(DragonNexusDF) <- names(DragonNexus)
+
+head(DragonNexusDF[, 1:5])
+dim(DragonNexusDF)
+```
+
+The original matrix should contain 77 dragons and 78 binary characters.
+
+```{r check-data}
+stopifnot(nrow(DragonNexusDF) == 77)
+stopifnot(ncol(DragonNexusDF) == 78)
+```
+
+## Add the three dragons
+
+The three dragons were coded using the character values from the assignment. The remaining characters are coded as `0` so that each new dragon has the same 78-character structure as the original matrix.
+
+```{r add-dragons}
+# Add the three dragons
+new_codes <- matrix(
+  c(
+    # Drogon
+    "004","005","002","002","003","001","004","003","002","002","003","001","002","002","004","002","001","005","001",
+    # Rhaegal
+    "004","004","002","002","002","002","003","002","002","002","002","001","002","002","004","002","001","004","001",
+    # Viserion
+    "004","004","003","002","002","001","004","004","003","003","004","001","003","002","004","002","002","004","001"
+  ),
+  nrow = 3,
+  byrow = TRUE
+)
+
+# Fill the remaining characters with 0
+new_codes_padded <- cbind(
+  new_codes,
+  matrix("000", nrow = 3, ncol = num_traits - ncol(new_codes))
+)
+
+new_dragons <- data.frame(new_codes_padded, stringsAsFactors = FALSE)
+row.names(new_dragons) <- c("Drogon", "Rhaegal", "Viserion")
+colnames(new_dragons) <- colnames(DragonNexusDF)
+
+nexus_updated <- rbind(DragonNexusDF, new_dragons)
+
+# Make sure the new matrix has the expected dimensions
+stopifnot(nrow(nexus_updated) == 80)
+stopifnot(ncol(nexus_updated) == 78)
+
+head(nexus_updated)
+tail(nexus_updated, 3)
+```
+
+Save the updated matrix so it can be checked separately from the original data.
+
+```{r save-data}
+dir.create("input", showWarnings = FALSE)
+write.csv(
+  nexus_updated,
+  "input/nexus_with_dragons.csv",
+  row.names = TRUE,
+  quote = TRUE
+)
+```
+
+## Distance matrix
+
+The character matrix contains `0`, `1`, and `?` values. For the distance calculation, I convert the observed binary characters to numeric values and leave missing values as `NA`.
+
+```{r distance}
+# Convert the character matrix to numeric values
+DragonNumeric <- matrix(
+  as.numeric(ifelse(nexus_updated == "?", NA, nexus_updated)),
+  nrow = nrow(nexus_updated),
+  ncol = ncol(nexus_updated),
+  dimnames = dimnames(nexus_updated)
+)
+
+DragonDist <- dist(DragonNumeric, method = "binary")
+DragonDistMatrix <- as.matrix(DragonDist)
+
+# Check the distance matrix
+round(DragonDistMatrix[1:5, 1:5], 3)
+```
+
+The diagonal should be zero because each dragon has a distance of zero from itself.
+
+```{r distance-check}
+stopifnot(all(diag(DragonDistMatrix) == 0))
+```
+
+## Plot the distance matrix
+
+```{r distance-plot}
+PDat <- as.data.frame(as.table(DragonDistMatrix))
+names(PDat) <- c("Query", "Subject", "Distance")
+
+ggplot(PDat, aes(x = Query, y = Subject, fill = Distance)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "magma") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
+    axis.text.y = element_text(size = 5)
+  ) +
+  labs(x = NULL, y = NULL, fill = "Distance")
+```
+
+## Build the Neighbor-Joining tree
+
+```{r tree}
+DragonTree <- nj(DragonDist)
+
+# Check that all 80 dragons are represented in the tree
+stopifnot(length(DragonTree$tip.label) == 80)
+
+DragonTree
+```
+
+## Colour the tree by the names in the original dataset
+
+The names in the matrix include information about where the original dragon image came from. I grouped those names into broad categories for the tree visualization.
+
+```{r groups}
+Traits <- data.frame(
+  Name = DragonTree$tip.label,
+  group = NA_character_,
+  stringsAsFactors = FALSE
+)
+
+Traits$group[grep("German", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("French", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("Dutch", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("English", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("American", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("British", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("Spanish", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("Italian", Traits$Name, ignore.case = TRUE)] <- "Western"
+Traits$group[grep("Japanese", Traits$Name, ignore.case = TRUE)] <- "Orientalia"
+Traits$group[grep("Indian", Traits$Name, ignore.case = TRUE)] <- "Orientalia"
+Traits$group[grep("Iranian", Traits$Name, ignore.case = TRUE)] <- "Orientalia"
+Traits$group[grep("Greece", Traits$Name, ignore.case = TRUE)] <- "Ancient"
+Traits$group[grep("Turkish", Traits$Name, ignore.case = TRUE)] <- "Ancient"
+Traits$group[grep("Snake", Traits$Name, ignore.case = TRUE)] <- "Serpentidae"
+Traits$group[grep("Fish", Traits$Name, ignore.case = TRUE)] <- "Aquatic"
+Traits$group[grep("Mammal", Traits$Name, ignore.case = TRUE)] <- "Beast"
+Traits$group[is.na(Traits$group)] <- "Other"
+
+Traits$group <- factor(Traits$group)
+table(Traits$group)
+```
+
+## Final tree
+
+```{r final-tree, fig.width=10, fig.height=10}
+ggtree(DragonTree, layout = "circular") %<+% Traits +
+  geom_tiplab(aes(color = group), size = 2.2, show.legend = TRUE) +
+  scale_color_manual(values = c(
+    "Western" = "red",
+    "Orientalia" = "blue",
+    "Ancient" = "lightblue",
+    "Serpentidae" = "green",
+    "Aquatic" = "black",
+    "Beast" = "purple",
+    "Other" = "gray"
+  )) +
+  ggtitle("Dragon Phylogeny") +
+  theme_tree2() +
+  theme(
+    legend.position = "right",
+    legend.text = element_text(size = 8),
+    legend.title = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+```
+
+## Notes
+
+This tree is based on the character matrix and the Neighbor-Joining method. The three new dragons are added to the same matrix as the original 77 observations, so they are included in the same distance calculation and tree.
+
+The original Dragon Phylogeny dataset and tutorial were provided through the Colautti Lab repository. The original dataset is being used here as course material; the analysis and additions above are my Assignment 8 work.
